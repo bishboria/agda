@@ -83,6 +83,7 @@ disabledTests =
   , RFInclude "Compiler/JS/.*"
   , RFExclude "Compiler/JS/simple/HelloWorld"
   , RFExclude "Compiler/JS/simple/String$"
+  , RFExclude "Compiler/JS/simple/PrintBool"
   ]
 
 tests :: IO TestTree
