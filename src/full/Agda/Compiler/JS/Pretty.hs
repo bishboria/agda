@@ -73,7 +73,7 @@ instance Pretty Exp where
   pretty n i (Undefined)            = "undefined"
   pretty n i (String s)             = "\"" ++ unescapes s ++ "\""
   pretty n i (Char c)               = "\"" ++ unescape c ++ "\""
-  pretty n i (Integer x)            = show x
+  pretty n i (Integer x)            = "agdaRTS.integerFromString(\"" ++ show x ++ "\")"
   pretty n i (Double x)             = show x
   pretty n i (Lambda x e)           =
     "function (" ++
@@ -111,6 +111,10 @@ exports n i lss (Export ls e : es) | otherwise =
 
 instance Pretty Module where
   pretty n i (Module m es) =
-    unlines ["var " ++ pretty n (i+1) e ++ " = require(" ++ modname e ++ ");"
-            | e <- js] ++ br i ++ exports n i (singleton []) es
-    where js = toList (globals es)
+    imports ++ br i ++ exports n i (singleton []) es
+    where
+      js = toList (globals es)
+      imports = unlines $
+            ["var agdaRTS = require(\"agda-rts\");"] ++
+            ["var " ++ pretty n (i+1) e ++ " = require(" ++ modname e ++ ");"
+            | e <- js]
