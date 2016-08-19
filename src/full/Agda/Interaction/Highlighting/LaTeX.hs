@@ -276,7 +276,7 @@ cmdPrefix :: Text
 cmdPrefix = T.pack "\\Agda"
 
 cmdArg :: Text -> Text
-cmdArg x = T.singleton '{' <+> x <+> T.singleton '}'
+cmdArg x = T.singleton '{' <+> T.pack (transform (T.unpack x)) <+> T.singleton '}'
 
 cmdIndent :: Show a => a -> Text
 cmdIndent i = cmdPrefix <+> T.pack "Indent" <+>
@@ -291,6 +291,23 @@ cmdIndent i = cmdPrefix <+> T.pack "Indent" <+>
 -- infixl' = T.pack "infixl"
 -- infix'  = T.pack "infix"
 -- infixr' = T.pack "infixr"
+
+transform :: String -> String
+transform x = case x of
+  "Sg" -> "\\Upsigma"
+  _    -> x
+
+processNonCode :: Text -> Text
+processNonCode = T.pack . unwords . map noncodeTransform . words . T.unpack
+
+noncodeTransform :: String -> String
+noncodeTransform x = case x of
+  "Sg" -> wrap "\\Upsigma"
+  _    -> x
+
+-- simple way to inline symbols that are found?
+wrap :: String -> String
+wrap x = "\\(" ++ x ++ "\\)"
 
 ------------------------------------------------------------------------
 -- * Automaton.
@@ -311,7 +328,18 @@ nonCode = do
        code
 
      else do
-       output tok
+       -- a single noncode token is the *entire* string of characters
+       -- between \end{code} and the next \begin{code}...
+       -- editing this string is a bit painful...
+       -- initial idea: split string
+       --               map noncodeTransform
+       --               rejoin
+       liftIO $ putStrLn "******************************************"
+       liftIO $ putStrLn $ T.unpack tok
+       liftIO $ putStrLn "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+
+       --output $ T.pack (noncodeTransform $ T.unpack tok) -- output tok -- <- used to be this
+       output $ processNonCode tok
        nonCode
 
 -- | Deals with code blocks. Every token, except spaces, is pretty
