@@ -298,8 +298,10 @@ transform x = case x of
   _    -> x
 
 processNonCode :: Text -> Text
-processNonCode = T.pack . unwords . map noncodeTransform . words . T.unpack
+processNonCode = T.unwords . map highlightingNonCode . T.words
 
+highlightingNonCode :: Text -> Text
+highlightingNonCode tok' = tok'
 noncodeTransform :: String -> String
 noncodeTransform x = case x of
   "Sg" -> wrap "\\Upsigma"
@@ -328,18 +330,7 @@ nonCode = do
        code
 
      else do
-       -- a single noncode token is the *entire* string of characters
-       -- between \end{code} and the next \begin{code}...
-       -- editing this string is a bit painful...
-       -- initial idea: split string
-       --               map noncodeTransform
-       --               rejoin
-       liftIO $ putStrLn "******************************************"
-       liftIO $ putStrLn $ T.unpack tok
-       liftIO $ putStrLn "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-
-       --output $ T.pack (noncodeTransform $ T.unpack tok) -- output tok -- <- used to be this
-       output $ processNonCode tok
+       output $ processNonCode (text tok')
        nonCode
 
 -- | Deals with code blocks. Every token, except spaces, is pretty

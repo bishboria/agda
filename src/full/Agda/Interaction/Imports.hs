@@ -24,7 +24,9 @@ import qualified Data.Map as Map
 import qualified Data.List as List
 import qualified Data.Set as Set
 import qualified Data.Foldable as Fold (toList)
+import qualified Data.HashMap.Strict as H
 import Data.List hiding (null)
+import Data.List.Split (splitOn)
 import Data.Maybe
 import Data.Monoid (mempty, mappend)
 import Data.Map (Map)
@@ -64,7 +66,7 @@ import Agda.Interaction.FindFile
 import {-# SOURCE #-} Agda.Interaction.InteractionTop (showOpenMetas)
 import Agda.Interaction.Options
 import qualified Agda.Interaction.Options.Lenses as Lens
-import Agda.Interaction.Highlighting.Precise (HighlightingInfo)
+import Agda.Interaction.Highlighting.Precise (HighlightingInfo, ranges)
 import Agda.Interaction.Highlighting.Generate
 import Agda.Interaction.Highlighting.Vim
 
@@ -626,6 +628,16 @@ removePrivates si = si { scopeModules = restrictPrivate <$> scopeModules si }
 -- If appropriate this function writes out syntax highlighting
 -- information.
 
+removeDefDupes :: [(String,String)] -> [(String,String)]
+removeDefDupes = nubBy (\ n m -> fst n == fst m)
+
+processDefs :: [(QName, Definition)] -> [(String,String)]
+processDefs []                    = []
+processDefs ((qname , defn) : xs) = (name,thing) : processDefs xs
+  where
+    name  = last $ splitOn "." $ show qname
+    thing = head $ splitOn " " $ show $ theDef defn
+
 createInterface
   :: AbsolutePath          -- ^ The file to type check.
   -> C.TopLevelModuleName  -- ^ The expected module name.
@@ -758,8 +770,14 @@ createInterface file mname isMain = Bench.billTo [Bench.TopModule mname] $
     -- Serialization.
     reportSLn "import.iface.create" 7 $ "Starting serialization."
     syntaxInfo <- use stSyntaxInfo
+
     i <- Bench.billTo [Bench.Serialization, Bench.BuildInterface] $ do
       buildInterface file topLevel syntaxInfo previousHsImports previousHsImportsUHC options
+
+    liftIO.putStrLn $ "******************* work out what I want to store ****"
+    liftIO.putStrLn $ ""
+    liftIO.putStrLn $ "******************* Signature definitions ************"
+    liftIO.putStrLn.show.removeDefDupes.processDefs $ H.toList $ iSignature i ^. sigDefinitions
 
     reportSLn "tc.top" 101 $ concat $
       "Signature:\n" :
