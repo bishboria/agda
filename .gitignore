@@ -26,6 +26,7 @@ dist-*/
 Epic
 examples/compiler/main
 hlint-report.html
+latex/
 MAlonzo
 mk/config.mk
 mk/parallel-tests.mk
