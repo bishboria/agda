@@ -26,7 +26,7 @@ import qualified Data.Set as Set
 import qualified Data.Foldable as Fold (toList)
 import qualified Data.HashMap.Strict as H
 import Data.List hiding (null)
-import Data.List.Split (splitOn)
+import Data.List.Split (splitOn, splitOneOf)
 import Data.Maybe
 import Data.Monoid (mempty, mappend)
 import Data.Map (Map)
@@ -42,6 +42,7 @@ import Agda.Benchmarking
 import qualified Agda.Syntax.Abstract as A
 import qualified Agda.Syntax.Concrete as C
 import Agda.Syntax.Abstract.Name
+import Agda.Syntax.Common -- For NamedArg
 import Agda.Syntax.Parser
 import Agda.Syntax.Position
 import Agda.Syntax.Scope.Base
@@ -208,7 +209,7 @@ alreadyVisited x getIface = do
 
 typeCheckMain :: AbsolutePath -> TCM (Interface, MaybeWarnings)
 typeCheckMain f = do
-  -- liftIO $ putStrLn $ "This is typeCheckMain " ++ prettyShow f
+  -- liftIO $ putStrLn=0P4 $ "This is typeCheckMain " ++ prettyShow f
   -- liftIO . putStrLn . show =<< getVerbosity
   reportSLn "import.main" 10 $ "Importing the primitive modules."
   libdir <- liftIO defaultLibDir
@@ -594,6 +595,64 @@ readInterface file = do
 
 -- | Writes the given interface to the given file.
 
+showInterfaceFunc :: (QName , Definition) -> [(String, String)]
+showInterfaceFunc p = let x       = snd p
+                          defn    = theDef x
+                          defType = head $ splitOn " " $ show defn
+                          name    = last $ splitOn "." $ show $ defName x
+                      in  (name , defType) : showDefn defn
+
+showDefn :: Defn -> [(String,String)]
+showDefn x = case x of
+  -- TODO: show bound variables from local functions
+  (Function c _ _ _ _ _ _ _ _ _ _ _ _) -> showNamedClauses c
+  _                                    -> []
+
+showNamedClauses :: [Clause] -> [(String,String)] -- who,var
+showNamedClauses []        = []
+showNamedClauses (c : cs') = showClause c ++ showTerm c ++ showNamedClauses cs'
+  where
+    showClause = peelNames.namedClausePats
+    showTerm c = case clauseBody c of
+      Nothing -> []
+      Just x  -> showT x
+
+    showT (Var i xs) = showElims xs -- [("VAR " ++ show i ++ show xs , "BOUND")]
+    showT (Lam _ t)  = [(absName t , "Bound")]
+    showT (Def _ xs) = showElims xs
+    showT (Pi d r)   = showDom d  -- show r?
+    showT (Con h as) = blargArgs as
+    showT x          = [("NOTFINISHEDYET" , show x)]
+
+    showElims []       = []
+    showElims (e : es) = showElim e ++ showElims es
+
+    showElim (Apply a) = showT $ unArg a
+    showElim x         = [] -- [ ("SOMETHINGELSE", show x) ]
+
+    showDom d = showT $ unEl $ unDom d
+
+    blargArgs []       = []
+    blargArgs (a : as) = (showT $ unArg a) ++ blargArgs as
+
+    peelNames []       = []
+    peelNames (p : ps) = (peelName p, "Bound") : peelNames ps
+
+    peelName = head.drop 1.splitOneOf "( ".show
+
+flatten :: [[(a,b)]] -> [(a,b)]
+flatten []       = []
+flatten (l : ls) = l ++ flatten ls
+
+showPair :: (String,String) -> String
+showPair (a , b) = concat [a," ",b,"\n"]
+showData :: [String] -> String
+showData [] = ""
+showData (d : ds) = d ++ showData ds
+
+--writeClassificationFile = writeLagda
+--writeReplacementFile
+
 writeInterface :: FilePath -> Interface -> TCM ()
 writeInterface file i = do
     reportSLn "import.iface.write" 5  $ "Writing interface file " ++ file ++ "."
@@ -609,6 +668,18 @@ writeInterface file i = do
     --   i { iInsideScope  = removePrivates $ iInsideScope i
     --     }
     encodeFile file i
+    liftIO $
+      writeFile "temp.info" $
+      showData $
+      --(\f -> do writeFile "temp.relace" $ map snd f; return f) $
+      map showPair $
+      flatten $
+      map nub $
+      groupBy ((==) `on` fst) $
+      sortBy  (compare `on` fst) $
+      flatten $
+      map showInterfaceFunc $
+      H.toList $ iSignature i ^. sigDefinitions
     reportSLn "import.iface.write" 5 $ "Wrote interface file."
     reportSLn "import.iface.write" 50 $ "  hash = " ++ show (iFullHash i) ++ ""
   `catchError` \e -> do
@@ -773,11 +844,6 @@ createInterface file mname isMain = Bench.billTo [Bench.TopModule mname] $
 
     i <- Bench.billTo [Bench.Serialization, Bench.BuildInterface] $ do
       buildInterface file topLevel syntaxInfo previousHsImports previousHsImportsUHC options
-
-    liftIO.putStrLn $ "******************* work out what I want to store ****"
-    liftIO.putStrLn $ ""
-    liftIO.putStrLn $ "******************* Signature definitions ************"
-    liftIO.putStrLn.show.removeDefDupes.processDefs $ H.toList $ iSignature i ^. sigDefinitions
 
     reportSLn "tc.top" 101 $ concat $
       "Signature:\n" :

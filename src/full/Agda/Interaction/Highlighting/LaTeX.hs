@@ -297,17 +297,53 @@ transform x = case x of
   "Sg" -> "\\Upsigma"
   _    -> x
 
+
+{-
+   Temp: can I call `code` from `nonCode` when processing a thing I want converted?
+-}
 processNonCode :: Text -> Text
 processNonCode = T.unwords . map highlightingNonCode . T.words
 
+-- where things like Nat List Sg get handled
 highlightingNonCode :: Text -> Text
 highlightingNonCode tok' = tok'
+  -- let tok = tok'
+  -- in  case aspect (info tok') of
+  --       Nothing -> escape tok
+  --       Just a  -> cmdPrefix <+> T.pack (cmd a) <+> cmdArg (escape tok)
+
+  --         where
+  --           cmd :: Aspect -> String
+  --           cmd a = let s = show a in case a of
+  --             Comment        -> s
+  --             Keyword        -> s
+  --             String         -> s
+  --             Number         -> s
+  --             Symbol         -> s
+  --             PrimitiveType  -> s
+  --             Name mKind _   -> maybe __IMPOSSIBLE__ showKind mKind
+  --          where
+  --            showKind :: NameKind -> String
+  --            showKind n = let s = show n in case n of
+  --              Bound                     -> s
+  --              Constructor Inductive     -> "InductiveConstructor"
+  --              Constructor CoInductive   -> "CoinductiveConstructor"
+  --              Datatype                  -> s
+  --              Field                     -> s
+  --              Function                  -> s
+  --              Module                    -> s
+  --              Postulate                 -> s
+  --              Primitive                 -> s
+  --              Record                    -> s
+  --              Argument                  -> s
+  --              Macro                     -> s
+  
 noncodeTransform :: String -> String
 noncodeTransform x = case x of
   "Sg" -> wrap "\\Upsigma"
   _    -> x
 
--- simple way to inline symbols that are found?
+-- simple way to inline non-code symbols that are found?
 wrap :: String -> String
 wrap x = "\\(" ++ x ++ "\\)"
 
@@ -318,10 +354,10 @@ wrap x = "\\(" ++ x ++ "\\)"
 -- literate Agda) until it sees a @beginBlock@.
 nonCode :: LaTeX ()
 nonCode = do
-  tok <- nextToken
-  log NonCode tok
+  tok' <- nextToken'
+  log NonCode (text tok')
 
-  if tok == beginCode
+  if (text tok') == beginCode
 
      then do
        output $ beginCode <+> nl
@@ -369,6 +405,7 @@ code = do
     spaces $ T.group tok
     code
 
+  -- where things like Nat List Sg get handled
   case aspect (info tok') of
     Nothing -> output $ escape tok
     Just a  -> output $ cmdPrefix <+> T.pack (cmd a) <+> cmdArg (escape tok)
