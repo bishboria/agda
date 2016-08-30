@@ -646,12 +646,30 @@ flatten (l : ls) = l ++ flatten ls
 
 showPair :: (String,String) -> String
 showPair (a , b) = concat [a," ",b,"\n"]
+
 showData :: [String] -> String
 showData [] = ""
 showData (d : ds) = d ++ showData ds
 
---writeClassificationFile = writeLagda
---writeReplacementFile
+extrude :: [[(String, String)]] -> [String]
+extrude = map showPair.flatten.map nub.groupBy ((==) `on` fst).sortBy (compare `on` fst).flatten
+
+extrude2 :: [[(String, String)]] -> [String]
+extrude2 = map (\x -> fst x ++"\n").flatten.map nub.groupBy ((==) `on` fst).sortBy (compare `on` fst).flatten
+
+writeClassificationFile :: FilePath -> Interface -> IO ()
+writeClassificationFile file i = do
+  let nestedDefs   = H.toList $ iSignature i ^. sigDefinitions
+      flattendDefs = map showInterfaceFunc nestedDefs
+      defs         = extrude flattendDefs
+  writeFile file $ showData defs
+
+writeReplacementFile :: ([[(String,String)]]->[String]) -> FilePath -> Interface -> IO ()
+writeReplacementFile extruder file i = do
+  let nestedDefs   = H.toList $ iSignature i ^. sigDefinitions
+      flattendDefs = map showInterfaceFunc nestedDefs
+      defs         = extruder flattendDefs
+  writeFile file $ showData defs
 
 writeInterface :: FilePath -> Interface -> TCM ()
 writeInterface file i = do
@@ -668,18 +686,10 @@ writeInterface file i = do
     --   i { iInsideScope  = removePrivates $ iInsideScope i
     --     }
     encodeFile file i
-    liftIO $
-      writeFile "temp.info" $
-      showData $
-      --(\f -> do writeFile "temp.relace" $ map snd f; return f) $
-      map showPair $
-      flatten $
-      map nub $
-      groupBy ((==) `on` fst) $
-      sortBy  (compare `on` fst) $
-      flatten $
-      map showInterfaceFunc $
-      H.toList $ iSignature i ^. sigDefinitions
+
+    liftIO $ writeClassificationFile "temp.info" i
+    liftIO $ writeReplacementFile extrude2 "temp.replacement" i
+
     reportSLn "import.iface.write" 5 $ "Wrote interface file."
     reportSLn "import.iface.write" 50 $ "  hash = " ++ show (iFullHash i) ++ ""
   `catchError` \e -> do
