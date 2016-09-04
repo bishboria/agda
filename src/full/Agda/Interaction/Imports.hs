@@ -604,7 +604,6 @@ showInterfaceFunc p = let x       = snd p
 
 showDefn :: Defn -> [(String,String)]
 showDefn x = case x of
-  -- TODO: show bound variables from local functions
   (Function c _ _ _ _ _ _ _ _ _ _ _ _) -> showNamedClauses c
   _                                    -> []
 
@@ -621,16 +620,20 @@ showNamedClauses (c : cs') = showClause c ++ showTerm c ++ showNamedClauses cs'
     showT (Lam _ t)  = [(absName t , "Bound")]
     showT (Def _ xs) = showElims xs
     showT (Pi d r)   = showDom d  -- show r?
-    showT (Con h as) = blargArgs as
+    showT (Con h as) = showCon h ++ blargArgs as
     showT x          = [("NOTFINISHEDYET" , show x)]
 
     showElims []       = []
     showElims (e : es) = showElim e ++ showElims es
 
     showElim (Apply a) = showT $ unArg a
-    showElim x         = [] -- [ ("SOMETHINGELSE", show x) ]
+    showElim x         = [ ("SOMETHINGELSE", show x) ]
 
     showDom d = showT $ unEl $ unDom d
+
+    showCon h = [(lastName h, "Constructor")]
+
+    lastName = last . splitOn "." . show . conName
 
     blargArgs []       = []
     blargArgs (a : as) = (showT $ unArg a) ++ blargArgs as
@@ -644,32 +647,18 @@ flatten :: [[(a,b)]] -> [(a,b)]
 flatten []       = []
 flatten (l : ls) = l ++ flatten ls
 
-showPair :: (String,String) -> String
-showPair (a , b) = concat [a," ",b,"\n"]
-
-showData :: [String] -> String
-showData [] = ""
-showData (d : ds) = d ++ showData ds
-
-extrude :: [[(String, String)]] -> [String]
-extrude = map showPair.flatten.map nub.groupBy ((==) `on` fst).sortBy (compare `on` fst).flatten
-
-extrude2 :: [[(String, String)]] -> [String]
-extrude2 = map (\x -> fst x ++"\n").flatten.map nub.groupBy ((==) `on` fst).sortBy (compare `on` fst).flatten
-
-writeClassificationFile :: FilePath -> Interface -> IO ()
-writeClassificationFile file i = do
-  let nestedDefs   = H.toList $ iSignature i ^. sigDefinitions
-      flattendDefs = map showInterfaceFunc nestedDefs
-      defs         = extrude flattendDefs
-  writeFile file $ showData defs
-
-writeReplacementFile :: ([[(String,String)]]->[String]) -> FilePath -> Interface -> IO ()
+writeReplacementFile :: ([(String,String)]->[String]) -> FilePath -> Interface -> IO ()
 writeReplacementFile extruder file i = do
   let nestedDefs   = H.toList $ iSignature i ^. sigDefinitions
-      flattendDefs = map showInterfaceFunc nestedDefs
-      defs         = extruder flattendDefs
-  writeFile file $ showData defs
+      sectionNames = nub $ map (last . splitOn "." . show . fst) $ Map.toList $ iSignature i ^. sigSections
+      process      = flatten.map nub.groupBy ((==) `on` fst).sortBy (compare `on` fst).flatten
+      flattendDefs = process $ map showInterfaceFunc nestedDefs
+      modules      = map (\x -> (x,"Module")) $ sectionNames \\ (map fst flattendDefs)
+      defs         = extruder (modules ++ flattendDefs)
+      finished     = unlines defs
+  putStrLn "************************************"
+  putStrLn finished
+  writeFile file finished
 
 writeInterface :: FilePath -> Interface -> TCM ()
 writeInterface file i = do
@@ -687,8 +676,10 @@ writeInterface file i = do
     --     }
     encodeFile file i
 
-    liftIO $ writeClassificationFile "temp.info" i
-    liftIO $ writeReplacementFile extrude2 "temp.replacement" i
+    -- coloring needed for code related things in commentary.
+    liftIO $ writeReplacementFile (map (\x -> fst x ++ "\t" ++ snd x)) (file ++ ".coloring") i
+    -- put your fancy replacements for ascii stuff in this file, once generated
+    liftIO $ writeReplacementFile (map (\x -> fst x ++ "\t"))          (file ++ ".replacements") i
 
     reportSLn "import.iface.write" 5 $ "Wrote interface file."
     reportSLn "import.iface.write" 50 $ "  hash = " ++ show (iFullHash i) ++ ""
@@ -710,7 +701,7 @@ removePrivates si = si { scopeModules = restrictPrivate <$> scopeModules si }
 -- information.
 
 removeDefDupes :: [(String,String)] -> [(String,String)]
-removeDefDupes = nubBy (\ n m -> fst n == fst m)
+removeDefDupes = nubBy ((==) `on` fst)
 
 processDefs :: [(QName, Definition)] -> [(String,String)]
 processDefs []                    = []
