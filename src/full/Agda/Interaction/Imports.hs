@@ -656,8 +656,6 @@ writeReplacementFile extruder file i = do
       modules      = map (\x -> (x,"Module")) $ sectionNames \\ (map fst flattendDefs)
       defs         = extruder (modules ++ flattendDefs)
       finished     = unlines defs
-  putStrLn "************************************"
-  putStrLn finished
   writeFile file finished
 
 writeInterface :: FilePath -> Interface -> TCM ()

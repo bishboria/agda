@@ -11,10 +11,12 @@ module Agda.Interaction.Highlighting.LaTeX
 
 import Prelude hiding (log)
 import Data.Char
+import Data.List.Split
 import Data.Maybe
 import Data.Function
 import Control.Monad.RWS.Strict
 import System.Directory
+import System.IO
 import System.FilePath
 import Data.Text (Text)
 import qualified Data.Text          as T
@@ -275,6 +277,9 @@ ptNL = nl <+> T.pack "\\\\\n"
 cmdPrefix :: Text
 cmdPrefix = T.pack "\\Agda"
 
+{-
+  Where code transforms take place
+-}
 cmdArg :: Text -> Text
 cmdArg x = T.singleton '{' <+> T.pack (transform (T.unpack x)) <+> T.singleton '}'
 
@@ -294,58 +299,34 @@ cmdIndent i = cmdPrefix <+> T.pack "Indent" <+>
 
 transform :: String -> String
 transform x = case x of
-  "Sg" -> "\\Upsigma"
-  _    -> x
-
+                "Sg" -> "\\AgdaDatatype{\\Upsigma}"
+                "_,_"  -> "\\AgdaInductiveConstructor{,}"
+                _    -> x
 
 {-
-   Temp: can I call `code` from `nonCode` when processing a thing I want converted?
+   Where non-code (ie main body text with references to terms)
 -}
-processNonCode :: Text -> Text
-processNonCode = T.unwords . map highlightingNonCode . T.words
+tempReplacements :: [(String,String)]
+tempReplacements = [ ("Sg" , "\\AgdaDatatype{\\Upsigma}")
+                   , ("_,_" , "\\AgdaInductiveConstructor{_,_}")
+                   ]
 
--- where things like Nat List Sg get handled
-highlightingNonCode :: Text -> Text
-highlightingNonCode tok' = tok'
-  -- let tok = tok'
-  -- in  case aspect (info tok') of
-  --       Nothing -> escape tok
-  --       Just a  -> cmdPrefix <+> T.pack (cmd a) <+> cmdArg (escape tok)
+strRep :: [(String,String)] -> String -> String
+strRep = flip $ List.foldl' replace
+  where
+    replace s (a,b) = let [ss,aa,bb] = [T.pack x | x <- [s,a,b]]
+                      in  T.unpack $ T.replace aa bb ss
 
-  --         where
-  --           cmd :: Aspect -> String
-  --           cmd a = let s = show a in case a of
-  --             Comment        -> s
-  --             Keyword        -> s
-  --             String         -> s
-  --             Number         -> s
-  --             Symbol         -> s
-  --             PrimitiveType  -> s
-  --             Name mKind _   -> maybe __IMPOSSIBLE__ showKind mKind
-  --          where
-  --            showKind :: NameKind -> String
-  --            showKind n = let s = show n in case n of
-  --              Bound                     -> s
-  --              Constructor Inductive     -> "InductiveConstructor"
-  --              Constructor CoInductive   -> "CoinductiveConstructor"
-  --              Datatype                  -> s
-  --              Field                     -> s
-  --              Function                  -> s
-  --              Module                    -> s
-  --              Postulate                 -> s
-  --              Primitive                 -> s
-  --              Record                    -> s
-  --              Argument                  -> s
-  --              Macro                     -> s
-  
-noncodeTransform :: String -> String
-noncodeTransform x = case x of
-  "Sg" -> wrap "\\Upsigma"
-  _    -> x
+-- alter processNonCode to accept a list of strings, and join them back up
+-- processNonCode is called with (strRep tempReplacements) right now.
+-- it will be called with (strRep <proper constructed replacements>)
+-- generated from the replacements and coloring files.
+processNonCode :: (String -> String) -> Text -> Text
+processNonCode f = T.pack . List.intercalate " " . map f . splitOn " " . T.unpack
 
 -- simple way to inline non-code symbols that are found?
 wrap :: String -> String
-wrap x = "\\(" ++ x ++ "\\)"
+wrap x = "$" ++ x ++ "$"
 
 ------------------------------------------------------------------------
 -- * Automaton.
@@ -354,10 +335,13 @@ wrap x = "\\(" ++ x ++ "\\)"
 -- literate Agda) until it sees a @beginBlock@.
 nonCode :: LaTeX ()
 nonCode = do
-  tok' <- nextToken'
-  log NonCode (text tok')
+  tok <- nextToken
+  log NonCode tok
 
-  if (text tok') == beginCode
+  liftIO $ print "Before processing"
+  liftIO $ print tok
+
+  if tok == beginCode
 
      then do
        output $ beginCode <+> nl
@@ -366,7 +350,9 @@ nonCode = do
        code
 
      else do
-       output $ processNonCode (text tok')
+       liftIO $ print "After processing"
+       liftIO $ print (processNonCode (strRep tempReplacements) tok)
+       output $ processNonCode (strRep tempReplacements) tok
        nonCode
 
 -- | Deals with code blocks. Every token, except spaces, is pretty
@@ -636,11 +622,13 @@ generateLaTeX i = do
       liftIO $ copyFile styFile (dir </> defaultStyFile)
 
   let outPath = modToFile mod
+  -- used for LaTeX replacements
+  let replacefile = head $ splitOn "." outPath
   inAbsPath <- liftM filePath (Find.findFile mod)
 
   liftIO $ do
     source <- UTF8.readTextFile inAbsPath
-    latex <- E.encodeUtf8 `fmap` toLaTeX source hi
+    latex <- E.encodeUtf8 `fmap` toLaTeX replacefile source hi
     createDirectoryIfMissing True $ dir </> takeDirectory outPath
     BS.writeFile (dir </> outPath) latex
 
@@ -649,10 +637,10 @@ generateLaTeX i = do
     modToFile m = List.intercalate [pathSeparator] (moduleNameParts m) <.> "tex"
 
 -- | Transforms the source code into LaTeX.
-toLaTeX :: String -> HighlightingInfo -> IO Text
-toLaTeX source hi
+toLaTeX :: String -> String -> HighlightingInfo -> IO Text
+toLaTeX replacefile source hi
 
-  = processTokens
+  = processTokens replacefile
 
   . concatMap stringLiteral
 
@@ -680,8 +668,15 @@ toLaTeX source hi
   where
   infoMap = toMap (decompress hi)
 
-processTokens :: Tokens -> IO Text
-processTokens ts = do
+processTokens :: String -> Tokens -> IO Text
+processTokens replacefile ts = do
+  -- read things here
+  colors       <- liftIO $ readFile $ replacefile ++ ".agdai.coloring"
+  replacements <- liftIO $ readFile $ replacefile ++ ".agdai.replacements"
+  let sc = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" colors
+  let sr = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" replacements
+  let src = zip sr $ map snd sc
+  liftIO $ print src
   (x, _, s) <- runLaTeX nonCode () (emptyState { tokens = ts })
   case x of
     Left "Done" -> return s
