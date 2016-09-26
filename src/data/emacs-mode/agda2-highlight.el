@@ -137,7 +137,9 @@ Also sets the default value of VARIABLE to GROUP."
              :background "purple")
             (agda2-highlight-typechecks-face
              :foreground "black"
-             :background "light blue")))
+             :background "light blue")
+            (font-lock-comment-face
+             :foreground "black")))
          ((equal group 'default-faces)
           (list (cons 'agda2-highlight-keyword-face
                       (agda2-highlight-face-attributes
