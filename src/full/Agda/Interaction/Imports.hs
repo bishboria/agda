@@ -600,7 +600,8 @@ showInterfaceFunc p = let x       = snd p
                           defn    = theDef x
                           defType = head $ splitOn " " $ show defn
                           name    = last $ splitOn "." $ show $ defName x
-                      in  (name , defType) : showDefn defn
+                          foo     = if defType == "Constructor" then "InductiveConstructor" else defType
+                      in  (name , foo) : showDefn defn
 
 showDefn :: Defn -> [(String,String)]
 showDefn x = case x of
@@ -617,7 +618,7 @@ showNamedClauses (c : cs') = showClause c ++ showTerm c ++ showNamedClauses cs'
       Just x  -> showT x
 
     showT (Var i xs) = showElims xs -- [("VAR " ++ show i ++ show xs , "BOUND")]
-    showT (Lam _ t)  = [(absName t , "Bound")]
+    showT (Lam _ t)  = [] -- [(absName t , "Bound")]
     showT (Def _ xs) = showElims xs
     showT (Pi d r)   = showDom d  -- show r?
     showT (Con h as) = showCon h ++ blargArgs as
@@ -631,7 +632,7 @@ showNamedClauses (c : cs') = showClause c ++ showTerm c ++ showNamedClauses cs'
 
     showDom d = showT $ unEl $ unDom d
 
-    showCon h = [(lastName h, "Constructor")]
+    showCon h = [(lastName h, "InductiveConstructor")]
 
     lastName = last . splitOn "." . show . conName
 
@@ -639,24 +640,25 @@ showNamedClauses (c : cs') = showClause c ++ showTerm c ++ showNamedClauses cs'
     blargArgs (a : as) = (showT $ unArg a) ++ blargArgs as
 
     peelNames []       = []
-    peelNames (p : ps) = (peelName p, "Bound") : peelNames ps
+    peelNames (p : ps) = [] -- (peelName p, "Bound") : peelNames ps
 
-    peelName = head.drop 1.splitOneOf "( ".show
-
-flatten :: [[(a,b)]] -> [(a,b)]
-flatten []       = []
-flatten (l : ls) = l ++ flatten ls
+    --peelName :: String -> String
+    --peelName = head.drop 1.splitOneOf "( ".show
 
 writeReplacementFile :: ([(String,String)]->[String]) -> FilePath -> Interface -> IO ()
 writeReplacementFile extruder file i = do
   let nestedDefs   = H.toList $ iSignature i ^. sigDefinitions
       sectionNames = nub $ map (last . splitOn "." . show . fst) $ Map.toList $ iSignature i ^. sigSections
-      process      = flatten.map nub.groupBy ((==) `on` fst).sortBy (compare `on` fst).flatten
+      process      = concat.map nub.groupBy ((==) `on` fst).sortBy (compare `on` fst).concat
       flattendDefs = process $ map showInterfaceFunc nestedDefs
       modules      = map (\x -> (x,"Module")) $ sectionNames \\ (map fst flattendDefs)
       defs         = extruder (modules ++ flattendDefs)
       finished     = unlines defs
-  writeFile file finished
+  -- if file already exists, load it, merge, write new.
+  exists <- doesFileExist file
+  if   exists
+  then return () -- appendFile file finished -- merge file finished
+  else writeFile file finished
 
 writeInterface :: FilePath -> Interface -> TCM ()
 writeInterface file i = do

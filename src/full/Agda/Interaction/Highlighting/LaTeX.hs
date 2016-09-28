@@ -281,7 +281,7 @@ cmdPrefix = T.pack "\\Agda"
   Where code transforms take place
 -}
 cmdArg :: Text -> Text
-cmdArg x = T.singleton '{' <+> T.pack (transform (T.unpack x)) <+> T.singleton '}'
+cmdArg x = T.singleton '{' <+> x <+> T.singleton '}'
 
 cmdIndent :: Show a => a -> Text
 cmdIndent i = cmdPrefix <+> T.pack "Indent" <+>
@@ -297,20 +297,9 @@ cmdIndent i = cmdPrefix <+> T.pack "Indent" <+>
 -- infix'  = T.pack "infix"
 -- infixr' = T.pack "infixr"
 
-transform :: String -> String
-transform x = case x of
-                "Sg" -> "\\AgdaDatatype{\\Upsigma}"
-                "_,_"  -> "\\AgdaInductiveConstructor{,}"
-                _    -> x
-
 {-
    Where non-code (ie main body text with references to terms)
 -}
-tempReplacements :: [(String,String)]
-tempReplacements = [ ("Sg" , "\\AgdaDatatype{\\Upsigma}")
-                   , ("_,_" , "\\AgdaInductiveConstructor{_,_}")
-                   ]
-
 strRep :: [(String,String)] -> String -> String
 strRep = flip $ List.foldl' replace
   where
@@ -333,8 +322,8 @@ wrap x = "$" ++ x ++ "$"
 
 -- | The start state, @nonCode@, prints non-code (the LaTeX part of
 -- literate Agda) until it sees a @beginBlock@.
-nonCode :: LaTeX ()
-nonCode = do
+nonCode :: [(String,String)] -> LaTeX ()
+nonCode replacements = do
   tok <- nextToken
   log NonCode tok
 
@@ -347,18 +336,18 @@ nonCode = do
        output $ beginCode <+> nl
        resetColumn
        setInCode
-       code
+       code replacements
 
      else do
        liftIO $ print "After processing"
-       liftIO $ print (processNonCode (strRep tempReplacements) tok)
-       output $ processNonCode (strRep tempReplacements) tok
-       nonCode
+       liftIO $ print (processNonCode (strRep replacements) tok)
+       output $ processNonCode (strRep replacements) tok
+       nonCode replacements
 
 -- | Deals with code blocks. Every token, except spaces, is pretty
 -- printed as a LaTeX command.
-code :: LaTeX ()
-code = do
+code :: [(String, String)] -> LaTeX ()
+code replacements = do
 
   -- Get the column information before grabbing the token, since
   -- grabbing (possibly) moves the column.
@@ -368,7 +357,7 @@ code = do
   let tok = text tok'
   log Code tok
 
-  when (tok == T.empty) code
+  when (tok == T.empty) (code replacements)
 
   when (col == 0 && not (isActualSpaces tok)) $ do
     output ptOpen
@@ -376,7 +365,7 @@ code = do
   when (tok == endCode) $ do
     output $ ptClose <+> nl <+> endCode
     unsetInCode
-    nonCode
+    nonCode replacements
 
   -- Andreas, 2016-09-08, issue #2140:
   -- The following special treatment of infix declarations seems
@@ -389,14 +378,14 @@ code = do
 
   when (isSpaces tok) $ do
     spaces $ T.group tok
-    code
+    code replacements
 
   -- where things like Nat List Sg get handled
   case aspect (info tok') of
     Nothing -> output $ escape tok
-    Just a  -> output $ cmdPrefix <+> T.pack (cmd a) <+> cmdArg (escape tok)
+    Just a  -> output $ cmdPrefix <+> T.pack (cmd a) <+> cmdArg (T.pack $ strRep replacements $ T.unpack $ escape tok)
 
-  code
+  code replacements
 
   where
   cmd :: Aspect -> String
@@ -668,16 +657,33 @@ toLaTeX replacefile source hi
   where
   infoMap = toMap (decompress hi)
 
-processTokens :: String -> Tokens -> IO Text
-processTokens replacefile ts = do
-  -- read things here
-  colors       <- liftIO $ readFile $ replacefile ++ ".agdai.coloring"
-  replacements <- liftIO $ readFile $ replacefile ++ ".agdai.replacements"
+datatononcodereplacement :: [((String,String),String)] -> [(String,String)]
+datatononcodereplacement [] = []
+datatononcodereplacement (((sym , rep) , color) : ps) =
+  let r = if rep /= "" then rep else sym
+  in  (sym , "\\Agda"++color++"{"++r++"}") : datatononcodereplacement ps
+
+datatoreplacement :: [(String,String)] -> [(String,String)]
+datatoreplacement [] = []
+datatoreplacement ((sym , rep) : rs) = (sym , if rep == "" then sym else rep) : datatoreplacement rs
+
+getReplacementData :: String -> IO ([(String,String)],[(String,String)])
+getReplacementData file = do
+  colors       <- liftIO $ readFile $ file ++ ".agdai.coloring"
+  replacements <- liftIO $ readFile $ file ++ ".agdai.replacements"
   let sc = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" colors
   let sr = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" replacements
   let src = zip sr $ map snd sc
-  liftIO $ print src
-  (x, _, s) <- runLaTeX nonCode () (emptyState { tokens = ts })
+  let nonCodeReplacements = datatononcodereplacement src
+  let codereplacements    = datatoreplacement sr
+  liftIO $ print $ codereplacements
+  return (nonCodeReplacements , codereplacements)
+
+processTokens :: String -> Tokens -> IO Text
+processTokens replacefile ts = do
+  -- read things here
+  (nonCodeReplacements , codeReplacements) <- getReplacementData replacefile
+  (x, _, s) <- runLaTeX (nonCode codeReplacements) () (emptyState { tokens = ts })
   case x of
     Left "Done" -> return s
     _           -> __IMPOSSIBLE__
