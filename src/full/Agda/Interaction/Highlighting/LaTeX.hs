@@ -322,10 +322,12 @@ wrap x = "$" ++ x ++ "$"
 
 -- | The start state, @nonCode@, prints non-code (the LaTeX part of
 -- literate Agda) until it sees a @beginBlock@.
-nonCode :: [(String,String)] -> LaTeX ()
+nonCode :: [(String,(String,String))] -> LaTeX ()
 nonCode replacements = do
   tok <- nextToken
   log NonCode tok
+
+  let transformNonCode = zip (map fst replacements) (map (snd.snd) replacements)
 
   if tok == beginCode
 
@@ -336,12 +338,12 @@ nonCode replacements = do
        code replacements
 
      else do
-       output $ processNonCode (strRep replacements) tok
+       output $ processNonCode (strRep transformNonCode) tok
        nonCode replacements
 
 -- | Deals with code blocks. Every token, except spaces, is pretty
 -- printed as a LaTeX command.
-code :: [(String, String)] -> LaTeX ()
+code :: [(String,(String,String))] -> LaTeX ()
 code replacements = do
 
   -- Get the column information before grabbing the token, since
@@ -351,6 +353,8 @@ code replacements = do
   tok' <- nextToken'
   let tok = text tok'
   log Code tok
+
+  let transformCode = zip (map fst replacements) (map (fst.snd) replacements)
 
   when (tok == T.empty) (code replacements)
 
@@ -378,7 +382,7 @@ code replacements = do
   -- where things like Nat List Sg get handled
   case aspect (info tok') of
     Nothing -> output $ escape tok
-    Just a  -> output $ cmdPrefix <+> T.pack (cmd a) <+> cmdArg (T.pack $ strRep replacements $ T.unpack $ escape tok)
+    Just a  -> output $ cmdPrefix <+> T.pack (cmd a) <+> cmdArg (T.pack $ strRep transformCode $ T.unpack $ escape tok)
 
   code replacements
 
@@ -655,30 +659,32 @@ toLaTeX replacefile source hi
 datatononcodereplacement :: [((String,String),String)] -> [(String,String)]
 datatononcodereplacement [] = []
 datatononcodereplacement (((sym , rep) , color) : ps) =
-  let r = if rep /= "" then rep else sym
+  let r = if rep == "" then sym else rep
   in  (sym , "\\Agda"++color++"{"++r++"}") : datatononcodereplacement ps
 
 datatoreplacement :: [(String,String)] -> [(String,String)]
 datatoreplacement [] = []
-datatoreplacement ((sym , rep) : rs) = (sym , if rep == "" then sym else rep) : datatoreplacement rs
+datatoreplacement ((sym , rep) : rs) =
+  (sym , if rep == "" then sym else rep) : datatoreplacement rs
 
-getReplacementData :: String -> IO ([(String,String)],[(String,String)])
+getReplacementData :: String -> IO [(String, (String, String))]
 getReplacementData file = do
   colors       <- liftIO $ readFile $ file ++ ".agdai.coloring"
   replacements <- liftIO $ readFile $ file ++ ".agdai.replacements"
   let sc = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" colors
   let sr = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" replacements
   let src = zip sr $ map snd sc
+--  let src = zip (map fst sc) $ zip (map snd sr) (map snd sc)
   let nonCodeReplacements = datatononcodereplacement src
   let codereplacements    = datatoreplacement sr
-  -- change this to return (sym , (code replacement , noncode replacement))
-  return (nonCodeReplacements , codereplacements)
+  let scnc = zip (map fst codereplacements) $ zip (map snd codereplacements) (map snd nonCodeReplacements)
+  return scnc
 
 processTokens :: String -> Tokens -> IO Text
 processTokens replacefile ts = do
   -- read things here
-  (nonCodeReplacements , codeReplacements) <- getReplacementData replacefile
-  (x, _, s) <- runLaTeX (nonCode codeReplacements) () (emptyState { tokens = ts })
+  replacements <- getReplacementData replacefile
+  (x, _, s) <- runLaTeX (nonCode replacements) () (emptyState { tokens = ts })
   case x of
     Left "Done" -> return s
     _           -> __IMPOSSIBLE__
