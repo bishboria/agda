@@ -327,9 +327,6 @@ nonCode replacements = do
   tok <- nextToken
   log NonCode tok
 
-  liftIO $ print "Before processing"
-  liftIO $ print tok
-
   if tok == beginCode
 
      then do
@@ -339,8 +336,6 @@ nonCode replacements = do
        code replacements
 
      else do
-       liftIO $ print "After processing"
-       liftIO $ print (processNonCode (strRep replacements) tok)
        output $ processNonCode (strRep replacements) tok
        nonCode replacements
 
@@ -676,7 +671,7 @@ getReplacementData file = do
   let src = zip sr $ map snd sc
   let nonCodeReplacements = datatononcodereplacement src
   let codereplacements    = datatoreplacement sr
-  liftIO $ print $ codereplacements
+  -- change this to return (sym , (code replacement , noncode replacement))
   return (nonCodeReplacements , codereplacements)
 
 processTokens :: String -> Tokens -> IO Text

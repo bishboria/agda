@@ -1,5 +1,6 @@
 {-# LANGUAGE CPP               #-}
 
+
 {-| This module deals with finding imported modules and loading their
     interface files.
 -}
@@ -31,6 +32,7 @@ import Data.Maybe
 import Data.Monoid (mempty, mappend)
 import Data.Map (Map)
 import Data.Set (Set)
+import qualified Data.Text as T (Text, uncons, empty, pack, unpack)
 
 import System.Directory (doesFileExist, getModificationTime, removeFile)
 import System.FilePath ((</>))
@@ -645,20 +647,6 @@ showNamedClauses (c : cs') = showClause c ++ showTerm c ++ showNamedClauses cs'
     --peelName :: String -> String
     --peelName = head.drop 1.splitOneOf "( ".show
 
-writeReplacementFile :: ([(String,String)]->[String]) -> FilePath -> Interface -> IO ()
-writeReplacementFile extruder file i = do
-  let nestedDefs   = H.toList $ iSignature i ^. sigDefinitions
-      sectionNames = nub $ map (last . splitOn "." . show . fst) $ Map.toList $ iSignature i ^. sigSections
-      process      = concat.map nub.groupBy ((==) `on` fst).sortBy (compare `on` fst).concat
-      flattendDefs = process $ map showInterfaceFunc nestedDefs
-      modules      = map (\x -> (x,"Module")) $ sectionNames \\ (map fst flattendDefs)
-      defs         = extruder (modules ++ flattendDefs)
-      finished     = unlines defs
-  -- if file already exists, load it, merge, write new.
-  exists <- doesFileExist file
-  if   exists
-  then return () -- appendFile file finished -- merge file finished
-  else writeFile file finished
 
 writeInterface :: FilePath -> Interface -> TCM ()
 writeInterface file i = do
@@ -676,9 +664,7 @@ writeInterface file i = do
     --     }
     encodeFile file i
 
-    -- coloring needed for code related things in commentary.
     liftIO $ writeReplacementFile (map (\x -> fst x ++ "\t" ++ snd x)) (file ++ ".coloring") i
-    -- put your fancy replacements for ascii stuff in this file, once generated
     liftIO $ writeReplacementFile (map (\x -> fst x ++ "\t"))          (file ++ ".replacements") i
 
     reportSLn "import.iface.write" 5 $ "Wrote interface file."
@@ -689,6 +675,45 @@ writeInterface file i = do
     liftIO $
       whenM (doesFileExist file) $ removeFile file
     throwError e
+
+writeReplacementFile :: ([(String,String)]->[String]) -> FilePath -> Interface -> IO ()
+writeReplacementFile extruder file i = do
+  let nestedDefs   = H.toList $ iSignature i ^. sigDefinitions
+      sectionNames = nub $ map (last . splitOn "." . show . fst) $ Map.toList $ iSignature i ^. sigSections
+      process      = concat.map nub.groupBy ((==) `on` fst).sortBy (compare `on` fst).concat
+      flattendDefs = process $ map showInterfaceFunc nestedDefs
+      modules      = map (\x -> (x,"Module")) $ sectionNames \\ (map fst flattendDefs)
+      defs         = extruder (modules ++ flattendDefs)
+      finished     = unlines defs
+  exists <- doesFileExist file
+  if   exists
+  then mergeFile file $ map (\(f , s) -> (f , "")) (modules ++ flattendDefs)
+  else writeFile file finished
+
+mergeFile :: FilePath -> [(String,String)] -> IO ()
+mergeFile file unsaveddata = do
+  filedata <- readFile file
+  print $ filedata -- because lazy haskell io. could map an equality function over the list then dump the result...
+  let saveddata = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" filedata
+
+  print "Saved Data"
+  print saveddata
+  print "Unsaved Data"
+  print unsaveddata
+  print "Merged Data"
+  print $ merge saveddata unsaveddata
+
+  writeFile file $ toString $ merge saveddata unsaveddata
+    where
+      toString []       = []
+      toString (p : ps) = (fst p) ++ "\t" ++ (snd p) ++ "\n" ++ toString ps
+
+merge :: Ord a => [(a,a)] -> [(a,a)] -> [(a,a)]
+merge xss@((fx , sx) : xs) yss@((fy , sy) : ys) | fx == fy  = (fx , sx) : merge xs  ys
+                                                | fx < fy   = (fx , sx) : merge xs  yss
+                                                | otherwise = (fy , sy) : merge xss ys
+merge [] ys = ys
+merge xs [] = xs
 
 removePrivates :: ScopeInfo -> ScopeInfo
 removePrivates si = si { scopeModules = restrictPrivate <$> scopeModules si }
