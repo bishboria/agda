@@ -693,16 +693,8 @@ writeReplacementFile extruder file i = do
 mergeFile :: FilePath -> [(String,String)] -> IO ()
 mergeFile file unsaveddata = do
   filedata <- readFile file
-  print $ filedata -- because lazy haskell io. could map an equality function over the list then dump the result...
+  print filedata -- because lazy io.
   let saveddata = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" filedata
-
-  print "Saved Data"
-  print saveddata
-  print "Unsaved Data"
-  print unsaveddata
-  print "Merged Data"
-  print $ merge saveddata unsaveddata
-
   writeFile file $ toString $ merge saveddata unsaveddata
     where
       toString []       = []
