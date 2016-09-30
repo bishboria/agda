@@ -297,23 +297,15 @@ cmdIndent i = cmdPrefix <+> T.pack "Indent" <+>
 -- infix'  = T.pack "infix"
 -- infixr' = T.pack "infixr"
 
-{-
-   Where non-code (ie main body text with references to terms)
--}
 strRep :: [(String,String)] -> String -> String
 strRep = flip $ List.foldl' replace
   where
     replace s (a,b) = let [ss,aa,bb] = [T.pack x | x <- [s,a,b]]
                       in  T.unpack $ T.replace aa bb ss
 
--- alter processNonCode to accept a list of strings, and join them back up
--- processNonCode is called with (strRep tempReplacements) right now.
--- it will be called with (strRep <proper constructed replacements>)
--- generated from the replacements and coloring files.
 processNonCode :: (String -> String) -> Text -> Text
 processNonCode f = T.pack . List.intercalate " " . map f . splitOn " " . T.unpack
 
--- simple way to inline non-code symbols that are found?
 wrap :: String -> String
 wrap x = "$" ++ x ++ "$"
 
@@ -327,7 +319,7 @@ nonCode replacements = do
   tok <- nextToken
   log NonCode tok
 
-  let transformNonCode = zip (map fst replacements) (map (snd.snd) replacements)
+  let transformNonCode = zip (map (\p -> wrap (fst p)) replacements) (map (snd.snd) replacements)
 
   if tok == beginCode
 
@@ -379,7 +371,6 @@ code replacements = do
     spaces $ T.group tok
     code replacements
 
-  -- where things like Nat List Sg get handled
   case aspect (info tok') of
     Nothing -> output $ escape tok
     Just a  -> output $ cmdPrefix <+> T.pack (cmd a) <+> cmdArg (T.pack $ strRep transformCode $ T.unpack $ escape tok)

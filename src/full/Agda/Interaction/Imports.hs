@@ -620,7 +620,7 @@ showNamedClauses (c : cs') = showClause c ++ showTerm c ++ showNamedClauses cs'
       Just x  -> showT x
 
     showT (Var i xs) = showElims xs -- [("VAR " ++ show i ++ show xs , "BOUND")]
-    showT (Lam _ t)  = [] -- [(absName t , "Bound")]
+    showT (Lam _ t)  = [(absName t , "Bound")]
     showT (Def _ xs) = showElims xs
     showT (Pi d r)   = showDom d  -- show r?
     showT (Con h as) = showCon h ++ blargArgs as
@@ -642,10 +642,12 @@ showNamedClauses (c : cs') = showClause c ++ showTerm c ++ showNamedClauses cs'
     blargArgs (a : as) = (showT $ unArg a) ++ blargArgs as
 
     peelNames []       = []
-    peelNames (p : ps) = [] -- (peelName p, "Bound") : peelNames ps
+    peelNames (p : ps) = (peelName p, "Bound") : peelNames ps
 
-    --peelName :: String -> String
-    --peelName = head.drop 1.splitOneOf "( ".show
+    peelName = head.drop 1.splitOneOf "( ".show
+
+
+data OutFile = Col | Rep deriving (Eq)
 
 
 writeInterface :: FilePath -> Interface -> TCM ()
@@ -664,8 +666,8 @@ writeInterface file i = do
     --     }
     encodeFile file i
 
-    liftIO $ writeReplacementFile (map (\x -> fst x ++ "\t" ++ snd x)) (file ++ ".coloring") i
-    liftIO $ writeReplacementFile (map (\x -> fst x ++ "\t"))          (file ++ ".replacements") i
+    liftIO $ writeReplacementFile Col (map (\x -> fst x ++ "\t" ++ snd x)) (file ++ ".coloring") i
+    liftIO $ writeReplacementFile Rep (map (\x -> fst x ++ "\t"))          (file ++ ".replacements") i
 
     reportSLn "import.iface.write" 5 $ "Wrote interface file."
     reportSLn "import.iface.write" 50 $ "  hash = " ++ show (iFullHash i) ++ ""
@@ -676,8 +678,14 @@ writeInterface file i = do
       whenM (doesFileExist file) $ removeFile file
     throwError e
 
-writeReplacementFile :: ([(String,String)]->[String]) -> FilePath -> Interface -> IO ()
-writeReplacementFile extruder file i = do
+
+
+
+
+
+
+writeReplacementFile :: OutFile -> ([(String,String)]->[String]) -> FilePath -> Interface -> IO ()
+writeReplacementFile outF extruder file i = do
   let nestedDefs   = H.toList $ iSignature i ^. sigDefinitions
       sectionNames = nub $ map (last . splitOn "." . show . fst) $ Map.toList $ iSignature i ^. sigSections
       process      = concat.map nub.groupBy ((==) `on` fst).sortBy (compare `on` fst).concat
@@ -687,25 +695,25 @@ writeReplacementFile extruder file i = do
       finished     = unlines defs
   exists <- doesFileExist file
   if   exists
-  then mergeFile file $ map (\(f , s) -> (f , "")) (modules ++ flattendDefs)
+  then mergeFile outF file (modules ++ flattendDefs)
   else writeFile file finished
 
-mergeFile :: FilePath -> [(String,String)] -> IO ()
-mergeFile file unsaveddata = do
+mergeFile :: OutFile -> FilePath -> [(String,String)] -> IO ()
+mergeFile outFile file unsaveddata = do
   filedata <- readFile file
   print filedata -- because lazy io.
   let saveddata = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" filedata
-  writeFile file $ toString $ merge saveddata unsaveddata
+  writeFile file $ toString $ merge outFile saveddata unsaveddata
     where
       toString []       = []
       toString (p : ps) = (fst p) ++ "\t" ++ (snd p) ++ "\n" ++ toString ps
 
-merge :: Ord a => [(a,a)] -> [(a,a)] -> [(a,a)]
-merge xss@((fx , sx) : xs) yss@((fy , sy) : ys) | fx == fy  = (fx , sx) : merge xs  ys
-                                                | fx < fy   = (fx , sx) : merge xs  yss
-                                                | otherwise = (fy , sy) : merge xss ys
-merge [] ys = ys
-merge xs [] = xs
+merge :: OutFile -> [(String,String)] -> [(String,String)] -> [(String,String)]
+merge outF xss@((fx , sx) : xs) yss@((fy , sy) : ys) | fx == fy  = (fx , sx) : merge outF xs  ys
+                                                     | fx < fy   = (fx , sx) : merge outF xs  yss
+                                                     | otherwise = (fy , if outF == Rep then "" else sy) : merge outF xss ys
+merge _ [] ys = ys
+merge _ xs [] = xs
 
 removePrivates :: ScopeInfo -> ScopeInfo
 removePrivates si = si { scopeModules = restrictPrivate <$> scopeModules si }
