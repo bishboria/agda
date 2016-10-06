@@ -44,7 +44,7 @@ import Agda.Benchmarking
 import qualified Agda.Syntax.Abstract as A
 import qualified Agda.Syntax.Concrete as C
 import Agda.Syntax.Abstract.Name
-import Agda.Syntax.Common -- For NamedArg
+import Agda.Syntax.Common
 import Agda.Syntax.Parser
 import Agda.Syntax.Position
 import Agda.Syntax.Scope.Base
@@ -72,6 +72,7 @@ import qualified Agda.Interaction.Options.Lenses as Lens
 import Agda.Interaction.Highlighting.Precise (HighlightingInfo, ranges)
 import Agda.Interaction.Highlighting.Generate
 import Agda.Interaction.Highlighting.Vim
+import Agda.Interaction.Highlighting.LaTeXExtensions
 
 import Agda.Utils.Except ( MonadError(catchError, throwError) )
 import Agda.Utils.FileName
@@ -597,57 +598,6 @@ readInterface file = do
 
 -- | Writes the given interface to the given file.
 
-showInterfaceFunc :: (QName , Definition) -> [(String, String)]
-showInterfaceFunc p = let x       = snd p
-                          defn    = theDef x
-                          defType = head $ splitOn " " $ show defn
-                          name    = last $ splitOn "." $ show $ defName x
-                          foo     = if defType == "Constructor" then "InductiveConstructor" else defType
-                      in  (name , foo) : showDefn defn
-
-showDefn :: Defn -> [(String,String)]
-showDefn x = case x of
-  (Function c _ _ _ _ _ _ _ _ _ _ _ _) -> showNamedClauses c
-  _                                    -> []
-
-showNamedClauses :: [Clause] -> [(String,String)] -- who,var
-showNamedClauses []        = []
-showNamedClauses (c : cs') = showClause c ++ showTerm c ++ showNamedClauses cs'
-  where
-    showClause = peelNames.namedClausePats
-    showTerm c = case clauseBody c of
-      Nothing -> []
-      Just x  -> showT x
-
-    showT (Var i xs) = showElims xs -- [("VAR " ++ show i ++ show xs , "BOUND")]
-    showT (Lam _ t)  = [(absName t , "Bound")]
-    showT (Def _ xs) = showElims xs
-    showT (Pi d r)   = showDom d  -- show r?
-    showT (Con h as) = showCon h ++ blargArgs as
-    showT x          = [("NOTFINISHEDYET" , show x)]
-
-    showElims []       = []
-    showElims (e : es) = showElim e ++ showElims es
-
-    showElim (Apply a) = showT $ unArg a
-    showElim x         = [ ("SOMETHINGELSE", show x) ]
-
-    showDom d = showT $ unEl $ unDom d
-
-    showCon h = [(lastName h, "InductiveConstructor")]
-
-    lastName = last . splitOn "." . show . conName
-
-    blargArgs []       = []
-    blargArgs (a : as) = (showT $ unArg a) ++ blargArgs as
-
-    peelNames []       = []
-    peelNames (p : ps) = (peelName p, "Bound") : peelNames ps
-
-    peelName = head.drop 1.splitOneOf "( ".show
-
-
-data OutFile = Col | Rep deriving (Eq)
 
 
 writeInterface :: FilePath -> Interface -> TCM ()
@@ -666,8 +616,7 @@ writeInterface file i = do
     --     }
     encodeFile file i
 
-    liftIO $ writeReplacementFile Col (map (\x -> fst x ++ "\t" ++ snd x)) (file ++ ".coloring") i
-    liftIO $ writeReplacementFile Rep (map (\x -> fst x ++ "\t"))          (file ++ ".replacements") i
+    liftIO $ writeHighlightingDataToFile file i
 
     reportSLn "import.iface.write" 5 $ "Wrote interface file."
     reportSLn "import.iface.write" 50 $ "  hash = " ++ show (iFullHash i) ++ ""
@@ -678,43 +627,6 @@ writeInterface file i = do
       whenM (doesFileExist file) $ removeFile file
     throwError e
 
-
-
-
-
-
-
-writeReplacementFile :: OutFile -> ([(String,String)]->[String]) -> FilePath -> Interface -> IO ()
-writeReplacementFile outF extruder file i = do
-  let nestedDefs   = H.toList $ iSignature i ^. sigDefinitions
-      sectionNames = nub $ map (last . splitOn "." . show . fst) $ Map.toList $ iSignature i ^. sigSections
-      process      = concat.map nub.groupBy ((==) `on` fst).sortBy (compare `on` fst).concat
-      flattendDefs = process $ map showInterfaceFunc nestedDefs
-      modules      = map (\x -> (x,"Module")) $ sectionNames \\ (map fst flattendDefs)
-      defs         = extruder (modules ++ flattendDefs)
-      finished     = unlines defs
-  exists <- doesFileExist file
-  if   exists
-  then mergeFile outF file (modules ++ flattendDefs)
-  else writeFile file finished
-
-mergeFile :: OutFile -> FilePath -> [(String,String)] -> IO ()
-mergeFile outFile file unsaveddata = do
-  filedata <- readFile file
-  print filedata -- because lazy io.
-  let saveddata = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" filedata
-  writeFile file $ toString $ merge outFile saveddata unsaveddata
-    where
-      toString []       = []
-      toString (p : ps) = (fst p) ++ "\t" ++ (snd p) ++ "\n" ++ toString ps
-
-merge :: OutFile -> [(String,String)] -> [(String,String)] -> [(String,String)]
-merge outF xss@((fx , sx) : xs) yss@((fy , sy) : ys) | fx == fy  = (fx , sx) : merge outF xs  ys
-                                                     | fx < fy   = (fx , sx) : merge outF xs  yss
-                                                     | otherwise = (fy , if outF == Rep then "" else sy) : merge outF xss ys
-merge _ [] ys = ys
-merge _ xs [] = xs
-
 removePrivates :: ScopeInfo -> ScopeInfo
 removePrivates si = si { scopeModules = restrictPrivate <$> scopeModules si }
 
@@ -724,16 +636,6 @@ removePrivates si = si { scopeModules = restrictPrivate <$> scopeModules si }
 --
 -- If appropriate this function writes out syntax highlighting
 -- information.
-
-removeDefDupes :: [(String,String)] -> [(String,String)]
-removeDefDupes = nubBy ((==) `on` fst)
-
-processDefs :: [(QName, Definition)] -> [(String,String)]
-processDefs []                    = []
-processDefs ((qname , defn) : xs) = (name,thing) : processDefs xs
-  where
-    name  = last $ splitOn "." $ show qname
-    thing = head $ splitOn " " $ show $ theDef defn
 
 createInterface
   :: AbsolutePath          -- ^ The file to type check.

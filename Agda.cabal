@@ -274,6 +274,7 @@ library
                     Agda.Interaction.Highlighting.Range
                     Agda.Interaction.Highlighting.Vim
                     Agda.Interaction.Highlighting.LaTeX
+                    Agda.Interaction.Highlighting.LaTeXExtensions
                     Agda.Interaction.Imports
                     Agda.Interaction.InteractionTop
                     Agda.Interaction.Response
