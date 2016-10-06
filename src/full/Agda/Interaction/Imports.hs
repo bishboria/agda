@@ -1,6 +1,5 @@
 {-# LANGUAGE CPP               #-}
 
-
 {-| This module deals with finding imported modules and loading their
     interface files.
 -}
@@ -25,14 +24,11 @@ import qualified Data.Map as Map
 import qualified Data.List as List
 import qualified Data.Set as Set
 import qualified Data.Foldable as Fold (toList)
-import qualified Data.HashMap.Strict as H
 import Data.List hiding (null)
-import Data.List.Split (splitOn, splitOneOf)
 import Data.Maybe
 import Data.Monoid (mempty, mappend)
 import Data.Map (Map)
 import Data.Set (Set)
-import qualified Data.Text as T (Text, uncons, empty, pack, unpack)
 
 import System.Directory (doesFileExist, getModificationTime, removeFile)
 import System.FilePath ((</>))
@@ -44,7 +40,6 @@ import Agda.Benchmarking
 import qualified Agda.Syntax.Abstract as A
 import qualified Agda.Syntax.Concrete as C
 import Agda.Syntax.Abstract.Name
-import Agda.Syntax.Common
 import Agda.Syntax.Parser
 import Agda.Syntax.Position
 import Agda.Syntax.Scope.Base
@@ -69,7 +64,7 @@ import Agda.Interaction.FindFile
 import {-# SOURCE #-} Agda.Interaction.InteractionTop (showOpenMetas)
 import Agda.Interaction.Options
 import qualified Agda.Interaction.Options.Lenses as Lens
-import Agda.Interaction.Highlighting.Precise (HighlightingInfo, ranges)
+import Agda.Interaction.Highlighting.Precise (HighlightingInfo)
 import Agda.Interaction.Highlighting.Generate
 import Agda.Interaction.Highlighting.Vim
 import Agda.Interaction.Highlighting.LaTeXExtensions
@@ -212,7 +207,7 @@ alreadyVisited x getIface = do
 
 typeCheckMain :: AbsolutePath -> TCM (Interface, MaybeWarnings)
 typeCheckMain f = do
-  -- liftIO $ putStrLn=0P4 $ "This is typeCheckMain " ++ prettyShow f
+  -- liftIO $ putStrLn $ "This is typeCheckMain " ++ prettyShow f
   -- liftIO . putStrLn . show =<< getVerbosity
   reportSLn "import.main" 10 $ "Importing the primitive modules."
   libdir <- liftIO defaultLibDir
@@ -598,8 +593,6 @@ readInterface file = do
 
 -- | Writes the given interface to the given file.
 
-
-
 writeInterface :: FilePath -> Interface -> TCM ()
 writeInterface file i = do
     reportSLn "import.iface.write" 5  $ "Writing interface file " ++ file ++ "."
@@ -615,9 +608,7 @@ writeInterface file i = do
     --   i { iInsideScope  = removePrivates $ iInsideScope i
     --     }
     encodeFile file i
-
     liftIO $ writeHighlightingDataToFile file i
-
     reportSLn "import.iface.write" 5 $ "Wrote interface file."
     reportSLn "import.iface.write" 50 $ "  hash = " ++ show (iFullHash i) ++ ""
   `catchError` \e -> do
@@ -769,7 +760,6 @@ createInterface file mname isMain = Bench.billTo [Bench.TopModule mname] $
     -- Serialization.
     reportSLn "import.iface.create" 7 $ "Starting serialization."
     syntaxInfo <- use stSyntaxInfo
-
     i <- Bench.billTo [Bench.Serialization, Bench.BuildInterface] $ do
       buildInterface file topLevel syntaxInfo previousHsImports previousHsImportsUHC options
 

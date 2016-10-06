@@ -35,7 +35,9 @@ import Agda.Syntax.Concrete
   (TopLevelModuleName, moduleNameParts, projectRoot)
 import qualified Agda.Interaction.FindFile as Find
 import Agda.Interaction.Highlighting.Precise
+import Agda.Interaction.Highlighting.LaTeXExtensions
 import Agda.TypeChecking.Monad (TCM, Interface(..))
+import Agda.TypeChecking.Monad (TCM)
 import qualified Agda.TypeChecking.Monad as TCM
 import Agda.Interaction.Options
 import Agda.Compiler.CallCompiler
@@ -277,9 +279,6 @@ ptNL = nl <+> T.pack "\\\\\n"
 cmdPrefix :: Text
 cmdPrefix = T.pack "\\Agda"
 
-{-
-  Where code transforms take place
--}
 cmdArg :: Text -> Text
 cmdArg x = T.singleton '{' <+> x <+> T.singleton '}'
 
@@ -297,17 +296,6 @@ cmdIndent i = cmdPrefix <+> T.pack "Indent" <+>
 -- infix'  = T.pack "infix"
 -- infixr' = T.pack "infixr"
 
-strRep :: [(String,String)] -> String -> String
-strRep = flip $ List.foldl' replace
-  where
-    replace s (a,b) = let [ss,aa,bb] = [T.pack x | x <- [s,a,b]]
-                      in  T.unpack $ T.replace aa bb ss
-
-processNonCode :: (String -> String) -> Text -> Text
-processNonCode f = T.pack . List.intercalate " " . map f . splitOn " " . T.unpack
-
-wrap :: String -> String
-wrap x = "$" ++ x ++ "$"
 
 ------------------------------------------------------------------------
 -- * Automaton.
@@ -319,8 +307,6 @@ nonCode replacements = do
   tok <- nextToken
   log NonCode tok
 
-  let transformNonCode = zip (map (\p -> wrap (fst p)) replacements) (map (snd.snd) replacements)
-
   if tok == beginCode
 
      then do
@@ -330,7 +316,7 @@ nonCode replacements = do
        code replacements
 
      else do
-       output $ processNonCode (strRep transformNonCode) tok
+       output $ processNonCodeToken replacements tok
        nonCode replacements
 
 -- | Deals with code blocks. Every token, except spaces, is pretty
@@ -345,8 +331,6 @@ code replacements = do
   tok' <- nextToken'
   let tok = text tok'
   log Code tok
-
-  let transformCode = zip (map fst replacements) (map (fst.snd) replacements)
 
   when (tok == T.empty) (code replacements)
 
@@ -373,7 +357,7 @@ code replacements = do
 
   case aspect (info tok') of
     Nothing -> output $ escape tok
-    Just a  -> output $ cmdPrefix <+> T.pack (cmd a) <+> cmdArg (T.pack $ strRep transformCode $ T.unpack $ escape tok)
+    Just a  -> output $ cmdPrefix <+> T.pack (cmd a) <+> cmdArg (processCodeToken (escape tok) replacements)
 
   code replacements
 
@@ -647,34 +631,10 @@ toLaTeX replacefile source hi
   where
   infoMap = toMap (decompress hi)
 
-datatononcodereplacement :: [((String,String),String)] -> [(String,String)]
-datatononcodereplacement [] = []
-datatononcodereplacement (((sym , rep) , color) : ps) =
-  let r = if rep == "" then sym else rep
-  in  (sym , "\\Agda"++color++"{"++r++"}") : datatononcodereplacement ps
-
-datatoreplacement :: [(String,String)] -> [(String,String)]
-datatoreplacement [] = []
-datatoreplacement ((sym , rep) : rs) =
-  (sym , if rep == "" then sym else rep) : datatoreplacement rs
-
-getReplacementData :: String -> IO [(String, (String, String))]
-getReplacementData file = do
-  colors       <- liftIO $ readFile $ file ++ ".agdai.coloring"
-  replacements <- liftIO $ readFile $ file ++ ".agdai.replacements"
-  let sc = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" colors
-  let sr = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" replacements
-  let src = zip sr $ map snd sc
---  let src = zip (map fst sc) $ zip (map snd sr) (map snd sc)
-  let nonCodeReplacements = datatononcodereplacement src
-  let codereplacements    = datatoreplacement sr
-  let scnc = zip (map fst codereplacements) $ zip (map snd codereplacements) (map snd nonCodeReplacements)
-  return scnc
-
 processTokens :: String -> Tokens -> IO Text
 processTokens replacefile ts = do
   -- read things here
-  replacements <- getReplacementData replacefile
+  replacements <- getReplacementDataFromFile replacefile
   (x, _, s) <- runLaTeX (nonCode replacements) () (emptyState { tokens = ts })
   case x of
     Left "Done" -> return s
