@@ -32,10 +32,41 @@ import qualified Data.List   as List
 import Data.Text (Text)
 import qualified Data.Text          as T
 
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+----- Exported functions
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+
 writeHighlightingDataToFile :: FilePath -> Interface -> IO ()
 writeHighlightingDataToFile file i = do
    writeReplacementFile Col (map (\x -> fst x ++ "\t" ++ snd x)) (file ++ ".coloring") i
    writeReplacementFile Rep (map (\x -> fst x ++ "\t"))          (file ++ ".replacements") i
+
+getReplacementDataFromFile :: String -> IO [(String, String, String)]
+getReplacementDataFromFile file = do
+  colors       <- readFile $ file ++ ".agdai.coloring"
+  replacements <- readFile $ file ++ ".agdai.replacements"
+  let sc = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" colors
+  let sr = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" replacements
+  let src = zip sr $ map snd sc
+--  let src = zip (map fst sc) $ zip (map snd sr) (map snd sc)
+  let nonCodeReplacements = datatononcodereplacement src
+  let codereplacements    = datatoreplacement sr
+  let scnc = zip (map fst codereplacements) $ zip (map snd codereplacements) (map snd nonCodeReplacements)
+  return scnc
+
+processNonCodeToken :: [(String,String,String)] -> Text -> Text
+processNonCodeToken replacements = processNonCode' (strRep $ transformNonCode replacements)
+
+processCodeToken :: Text -> [(String,String,String)] -> Text
+processCodeToken tok replacements = T.pack $ strRep (transformCode replacements) $ T.unpack tok
+
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+----- Stuff to make ^^ work
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 writeReplacementFile :: OutFile -> ([(String,String)]->[String]) -> FilePath -> Interface -> IO ()
 writeReplacementFile outF extruder file i = do
@@ -157,27 +188,21 @@ strRep = flip $ List.foldl' replace
     replace s (a,b) = let [ss,aa,bb] = [T.pack x | x <- [s,a,b]]
                       in  T.unpack $ T.replace aa bb ss
 
-processNonCodeToken :: [(String,(String,String))] -> Text -> Text
-processNonCodeToken replacements = processNonCode' (strRep $ transformNonCode replacements)
-
 processNonCode' :: (String -> String) -> Text -> Text
 processNonCode' f = T.pack . List.intercalate " " . map f . splitOn " " . T.unpack
 
 wrap :: String -> String
 wrap x = "$" ++ x ++ "$"
 
-transformNonCode :: [(String,(String,String))] -> [(String,String)]
+transformNonCode :: [(String,String,String)] -> [(String,String)]
 transformNonCode replacements = zip (map (\p -> wrap (fst p)) replacements) (map (snd.snd) replacements)
 
-processCodeToken :: Text -> [(String,(String,String))] -> Text
-processCodeToken tok replacements = T.pack $ strRep (transformCode replacements) $ T.unpack tok
-
-transformCode :: [(String,(String,String))] -> [(String,String)]
+transformCode :: [(String,String,String)] -> [(String,String)]
 transformCode replacements = zip (map fst replacements) (map (fst.snd) replacements)
 
-datatononcodereplacement :: [((String,String),String)] -> [(String,String)]
+datatononcodereplacement :: [(String,String,String)] -> [(String,String)]
 datatononcodereplacement [] = []
-datatononcodereplacement (((sym , rep) , color) : ps) =
+datatononcodereplacement ((sym , rep , color) : ps) =
   let r = if rep == "" then sym else rep
   in  (sym , "\\Agda"++color++"{"++r++"}") : datatononcodereplacement ps
 
@@ -185,16 +210,3 @@ datatoreplacement :: [(String,String)] -> [(String,String)]
 datatoreplacement [] = []
 datatoreplacement ((sym , rep) : rs) =
   (sym , if rep == "" then sym else rep) : datatoreplacement rs
-
-getReplacementDataFromFile :: String -> IO [(String, (String, String))]
-getReplacementDataFromFile file = do
-  colors       <- readFile $ file ++ ".agdai.coloring"
-  replacements <- readFile $ file ++ ".agdai.replacements"
-  let sc = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" colors
-  let sr = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" replacements
-  let src = zip sr $ map snd sc
---  let src = zip (map fst sc) $ zip (map snd sr) (map snd sc)
-  let nonCodeReplacements = datatononcodereplacement src
-  let codereplacements    = datatoreplacement sr
-  let scnc = zip (map fst codereplacements) $ zip (map snd codereplacements) (map snd nonCodeReplacements)
-  return scnc
