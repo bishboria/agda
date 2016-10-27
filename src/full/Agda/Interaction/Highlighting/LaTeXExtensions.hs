@@ -49,11 +49,10 @@ getReplacementDataFromFile file = do
   replacements <- readFile $ file ++ ".agdai.replacements"
   let sc = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" colors
   let sr = init $ map ((\l -> (head l, last l)) . splitOn "\t") $ splitOn "\n" replacements
-  let src = zip sr $ map snd sc
---  let src = zip (map fst sc) $ zip (map snd sr) (map snd sc)
+  let src = map (\p -> (fst $ fst p , snd $ fst p , snd p)) $ zip sr $ map snd sc
   let nonCodeReplacements = datatononcodereplacement src
   let codereplacements    = datatoreplacement sr
-  let scnc = zip (map fst codereplacements) $ zip (map snd codereplacements) (map snd nonCodeReplacements)
+  let scnc = map (\p -> (fst p , fst $ snd p, snd $ snd p)) $ zip (map fst codereplacements) $ zip (map snd codereplacements) (map snd nonCodeReplacements)
   return scnc
 
 processNonCodeToken :: [(String,String,String)] -> Text -> Text
@@ -68,6 +67,11 @@ processCodeToken tok replacements = T.pack $ strRep (transformCode replacements)
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
+{-
+  FIXME:
+    - Use printing of sigSections in order to work out where the named arguments
+      of constructors appear...
+-}
 writeReplacementFile :: OutFile -> ([(String,String)]->[String]) -> FilePath -> Interface -> IO ()
 writeReplacementFile outF extruder file i = do
   let nestedDefs   = H.toList $ iSignature i ^. sigDefinitions
@@ -92,6 +96,12 @@ showInterfaceFunc p = let x       = snd p
                           foo     = if defType == "Constructor" then "InductiveConstructor" else defType
                       in  (name , foo) : showDefn defn
 
+
+{-
+  FIXME:
+    - I'm still missing named arguments to constructors
+      - WHERE ARE THEY?
+-}
 showDefn :: Defn -> [(String,String)]
 showDefn x = case x of
   (Function c _ _ _ _ _ _ _ _ _ _ _ _) -> showNamedClauses c
@@ -116,6 +126,18 @@ showDefn x = case x of
   --                                         ]
   -- _                                    -> []
 
+
+{-
+  FIXME:
+
+  Function needs to be improved:
+    - Variables used in constructors aren't being written to file as 'Bound'
+    - not outputting all things yet
+      - NOTFINISHEDYET
+      - SOMETHINGELSE
+      - show r?
+
+-}
 showNamedClauses :: [Clause] -> [(String,String)] -- who,var
 showNamedClauses []        = []
 showNamedClauses (c : cs') = showClause c ++ showTerm c ++ showNamedClauses cs'
@@ -130,13 +152,13 @@ showNamedClauses (c : cs') = showClause c ++ showTerm c ++ showNamedClauses cs'
     showT (Def _ xs) = showElims xs
     showT (Pi d r)   = showDom d  -- show r?
     showT (Con h as) = showCon h ++ blargArgs as
-    showT x          = [("NOTFINISHEDYET" , show x)]
+    showT x          = [] -- [("NOTFINISHEDYET" , show x)]
 
     showElims []       = []
     showElims (e : es) = showElim e ++ showElims es
 
     showElim (Apply a) = showT $ unArg a
-    showElim x         = [ ("SOMETHINGELSE", show x) ]
+    showElim x         = [] -- [ ("SOMETHINGELSE", show x) ]
 
     showDom d = showT $ unEl $ unDom d
 
@@ -148,8 +170,12 @@ showNamedClauses (c : cs') = showClause c ++ showTerm c ++ showNamedClauses cs'
     blargArgs (a : as) = (showT $ unArg a) ++ blargArgs as
 
     peelNames []       = []
-    peelNames (p : ps) = (peelName p, "Bound") : peelNames ps
+    peelNames (p : ps) = let var = peelName p
+                         in  if   var == "" || var == "="
+                             then peelNames ps
+                             else (var, "Bound") : peelNames ps
 
+    -- this needs to be fixed so that empty strings, garbage, don't show up
     peelName = head.drop 1.splitOneOf "( ".show
 
 
@@ -164,11 +190,11 @@ mergeFile outFile file unsaveddata = do
       toString (p : ps) = (fst p) ++ "\t" ++ (snd p) ++ "\n" ++ toString ps
 
 merge :: OutFile -> [(String,String)] -> [(String,String)] -> [(String,String)]
+merge outF [] ys = map (\p -> (fst p, if outF == Rep then "" else snd p)) ys
+merge _ xs [] = xs
 merge outF xss@((fx , sx) : xs) yss@((fy , sy) : ys) | fx == fy  = (fx , sx) : merge outF xs  ys
                                                      | fx < fy   = (fx , sx) : merge outF xs  yss
                                                      | otherwise = (fy , if outF == Rep then "" else sy) : merge outF xss ys
-merge _ [] ys = ys
-merge _ xs [] = xs
 
 data OutFile = Col | Rep deriving (Eq)
 
@@ -194,11 +220,20 @@ processNonCode' f = T.pack . List.intercalate " " . map f . splitOn " " . T.unpa
 wrap :: String -> String
 wrap x = "$" ++ x ++ "$"
 
+fstTrip :: (String,String,String) -> String
+fstTrip (a,b,c) = a
+
+sndTrip :: (String,String,String) -> String
+sndTrip (a,b,c) = b
+
+lstTrip :: (String,String,String) -> String
+lstTrip (a,b,c) = c
+
 transformNonCode :: [(String,String,String)] -> [(String,String)]
-transformNonCode replacements = zip (map (\p -> wrap (fst p)) replacements) (map (snd.snd) replacements)
+transformNonCode replacements = zip (map (wrap.fstTrip) replacements) (map (wrap.lstTrip) replacements)
 
 transformCode :: [(String,String,String)] -> [(String,String)]
-transformCode replacements = zip (map fst replacements) (map (fst.snd) replacements)
+transformCode replacements = zip (map fstTrip replacements) (map sndTrip replacements)
 
 datatononcodereplacement :: [(String,String,String)] -> [(String,String)]
 datatononcodereplacement [] = []

@@ -302,7 +302,7 @@ cmdIndent i = cmdPrefix <+> T.pack "Indent" <+>
 
 -- | The start state, @nonCode@, prints non-code (the LaTeX part of
 -- literate Agda) until it sees a @beginBlock@.
-nonCode :: [(String,(String,String))] -> LaTeX ()
+nonCode :: [(String,String,String)] -> LaTeX ()
 nonCode replacements = do
   tok <- nextToken
   log NonCode tok
@@ -321,7 +321,7 @@ nonCode replacements = do
 
 -- | Deals with code blocks. Every token, except spaces, is pretty
 -- printed as a LaTeX command.
-code :: [(String,(String,String))] -> LaTeX ()
+code :: [(String,String,String)] -> LaTeX ()
 code replacements = do
 
   -- Get the column information before grabbing the token, since
@@ -633,7 +633,6 @@ toLaTeX replacefile source hi
 
 processTokens :: String -> Tokens -> IO Text
 processTokens replacefile ts = do
-  -- read things here
   replacements <- getReplacementDataFromFile replacefile
   (x, _, s) <- runLaTeX (nonCode replacements) () (emptyState { tokens = ts })
   case x of
