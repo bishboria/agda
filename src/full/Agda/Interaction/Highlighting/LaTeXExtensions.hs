@@ -4,6 +4,8 @@ module Agda.Interaction.Highlighting.LaTeXExtensions
   , getReplacementDataFromFile
   , processNonCodeToken
   , processCodeToken
+  , Replacements
+  , ReplacementMap
   ) where
 
 import Prelude hiding (null)
@@ -32,6 +34,19 @@ import qualified Data.List   as List
 import Data.Text (Text)
 import qualified Data.Text          as T
 
+
+
+-------------
+-------------
+-- Exported type things
+-------------
+-------------
+
+type Replacements   = [(String, String, String)]
+type ReplacementMap = [(String,String)]
+
+
+
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 ----- Exported functions
@@ -43,7 +58,7 @@ writeHighlightingDataToFile file i = do
    writeReplacementFile Col (map (\x -> fst x ++ "\t" ++ snd x)) (file ++ ".coloring") i
    writeReplacementFile Rep (map (\x -> fst x ++ "\t"))          (file ++ ".replacements") i
 
-getReplacementDataFromFile :: String -> IO [(String, String, String)]
+getReplacementDataFromFile :: FilePath -> IO Replacements
 getReplacementDataFromFile file = do
   colors       <- readFile $ file ++ ".agdai.coloring"
   replacements <- readFile $ file ++ ".agdai.replacements"
@@ -55,10 +70,10 @@ getReplacementDataFromFile file = do
   let scnc = map (\p -> (fst p , fst $ snd p, snd $ snd p)) $ zip (map fst codereplacements) $ zip (map snd codereplacements) (map snd nonCodeReplacements)
   return scnc
 
-processNonCodeToken :: [(String,String,String)] -> Text -> Text
+processNonCodeToken :: Replacements -> Text -> Text
 processNonCodeToken replacements = processNonCode' (strRep $ transformNonCode replacements)
 
-processCodeToken :: Text -> [(String,String,String)] -> Text
+processCodeToken :: Text -> Replacements -> Text
 processCodeToken tok replacements = T.pack $ strRep (transformCode replacements) $ T.unpack tok
 
 --------------------------------------------------------------------------------
@@ -72,7 +87,7 @@ processCodeToken tok replacements = T.pack $ strRep (transformCode replacements)
     - Use printing of sigSections in order to work out where the named arguments
       of constructors appear...
 -}
-writeReplacementFile :: OutFile -> ([(String,String)]->[String]) -> FilePath -> Interface -> IO ()
+writeReplacementFile :: OutFile -> (ReplacementMap -> [String]) -> FilePath -> Interface -> IO ()
 writeReplacementFile outF extruder file i = do
   let nestedDefs   = H.toList $ iSignature i ^. sigDefinitions
       sectionNames = nub $ map (last . splitOn "." . show . fst) $ Map.toList $ iSignature i ^. sigSections
@@ -81,8 +96,10 @@ writeReplacementFile outF extruder file i = do
       modules      = map (\x -> (x,"Module")) $ sectionNames \\ (map fst flattendDefs)
       defs         = extruder (modules ++ flattendDefs)
       finished     = unlines defs
---  print "****************************** Sections"
---  print . Map.toList $ iSignature i ^. sigSections
+
+  -- print "****************************** Definitions"
+  -- print nestedDefs
+
   exists <- doesFileExist file
   if   exists
   then mergeFile outF file (modules ++ flattendDefs)
@@ -102,7 +119,7 @@ showInterfaceFunc p = let x       = snd p
     - I'm still missing named arguments to constructors
       - WHERE ARE THEY?
 -}
-showDefn :: Defn -> [(String,String)]
+showDefn :: Defn -> ReplacementMap
 showDefn x = case x of
   (Function c _ _ _ _ _ _ _ _ _ _ _ _) -> showNamedClauses c
   _                                    -> []
@@ -138,7 +155,7 @@ showDefn x = case x of
       - show r?
 
 -}
-showNamedClauses :: [Clause] -> [(String,String)] -- who,var
+showNamedClauses :: [Clause] -> ReplacementMap -- who,var
 showNamedClauses []        = []
 showNamedClauses (c : cs') = showClause c ++ showTerm c ++ showNamedClauses cs'
   where
@@ -189,7 +206,7 @@ mergeFile outFile file unsaveddata = do
       toString []       = []
       toString (p : ps) = (fst p) ++ "\t" ++ (snd p) ++ "\n" ++ toString ps
 
-merge :: OutFile -> [(String,String)] -> [(String,String)] -> [(String,String)]
+merge :: OutFile -> ReplacementMap -> ReplacementMap -> ReplacementMap
 merge outF [] ys = map (\p -> (fst p, if outF == Rep then "" else snd p)) ys
 merge _ xs [] = xs
 merge outF xss@((fx , sx) : xs) yss@((fy , sy) : ys) | fx == fy  = (fx , sx) : merge outF xs  ys
@@ -208,7 +225,7 @@ data OutFile = Col | Rep deriving (Eq)
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
-strRep :: [(String,String)] -> String -> String
+strRep :: ReplacementMap -> String -> String
 strRep = flip $ List.foldl' replace
   where
     replace s (a,b) = let [ss,aa,bb] = [T.pack x | x <- [s,a,b]]
@@ -229,19 +246,19 @@ sndTrip (a,b,c) = b
 lstTrip :: (String,String,String) -> String
 lstTrip (a,b,c) = c
 
-transformNonCode :: [(String,String,String)] -> [(String,String)]
+transformNonCode :: Replacements -> ReplacementMap
 transformNonCode replacements = zip (map (wrap.fstTrip) replacements) (map (wrap.lstTrip) replacements)
 
-transformCode :: [(String,String,String)] -> [(String,String)]
+transformCode :: Replacements -> ReplacementMap
 transformCode replacements = zip (map fstTrip replacements) (map sndTrip replacements)
 
-datatononcodereplacement :: [(String,String,String)] -> [(String,String)]
+datatononcodereplacement :: Replacements -> ReplacementMap
 datatononcodereplacement [] = []
 datatononcodereplacement ((sym , rep , color) : ps) =
   let r = if rep == "" then sym else rep
   in  (sym , "\\Agda"++color++"{"++r++"}") : datatononcodereplacement ps
 
-datatoreplacement :: [(String,String)] -> [(String,String)]
+datatoreplacement :: ReplacementMap -> ReplacementMap
 datatoreplacement [] = []
 datatoreplacement ((sym , rep) : rs) =
   (sym , if rep == "" then sym else rep) : datatoreplacement rs
